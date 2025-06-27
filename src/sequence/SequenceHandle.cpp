@@ -207,8 +207,12 @@ void SequenceHandle::update(double position, float frame, float fps)
 
 	m_entry->m_volume.read(frame, &value);
 	m_handle->setVolume(value);
-	m_entry->m_pitch.read(frame, &value);
-	m_handle->setPitch(value);
+
+	if (!m_entry->m_correctPitch) {
+		m_entry->m_pitch.read(frame, &value);
+		printf("frame %f value %f\n", frame, value);
+		m_handle->setPitch(value);
+	}
 
 	m_entry->m_time_stretch.read(frame, &value);
 	m_handle->setTimeStretch(value);

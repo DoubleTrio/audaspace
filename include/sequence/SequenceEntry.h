@@ -111,6 +111,9 @@ private:
 	/// The animated pitch.
 	AnimateableProperty m_pitch;
 
+	/// The animated pitch.
+	bool m_correctPitch;
+
 	/// The animated time-stretch value.
 	AnimateableProperty m_time_stretch;
 
@@ -320,6 +323,13 @@ public:
 	 * \return Whether the action succeeded.
 	 */
 	void setConeVolumeOuter(float volume);
+
+	/**
+	 * Whether to correct the pitch through not reading the value at the current frame in SequenceHandle
+	 * \param correct Whether to correct pitch
+	 * \return Whether the action succeeded.
+	 */
+	void setCorrectPitch(bool correct);
 };
 
 AUD_NAMESPACE_END

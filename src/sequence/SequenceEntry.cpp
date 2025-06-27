@@ -37,6 +37,7 @@ SequenceEntry::SequenceEntry(std::shared_ptr<ISound> sound, double begin, double
     m_relative(true),
     m_volume_max(1.0f),
     m_volume_min(0),
+		m_correctPitch(false),
     m_distance_max(std::numeric_limits<float>::max()),
     m_distance_reference(1.0f),
     m_attenuation(1.0f),
@@ -257,6 +258,11 @@ void SequenceEntry::setConeVolumeOuter(float volume)
 
 	m_cone_volume_outer = volume;
 	m_status++;
+}
+
+void SequenceEntry::setCorrectPitch(bool correct) {
+	std::lock_guard<std::recursive_mutex> lock(m_mutex);
+	m_correctPitch = correct;
 }
 
 AUD_NAMESPACE_END
