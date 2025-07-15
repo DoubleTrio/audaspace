@@ -54,80 +54,77 @@ void TimeStretchPitchScaleReader::read(int& length, bool& eos, sample_t* buffer)
 	int len;
 	sample_t* buf;
 
-
 	int buf_position = 0;
 
 	int available = m_stretcher->available();
 
 	int left = length;
 
+	while(buf_position < length && !eos)
+	{
+		if(!m_finishedReader)
+		{
+			size_t required = m_stretcher->getSamplesRequired();
+			len = required;
 
-while (buf_position < length && !eos)
-{
+			m_buffer.assureSize(len * samplesize);
+			sample_t* buf = m_buffer.getBuffer();
 
-	if (!m_finishedReader) {
-    size_t required = m_stretcher->getSamplesRequired();
-    len = required;
+			m_reader->read(len, m_finishedReader, buf);
+			m_position += len;
 
-    m_buffer.assureSize(len * samplesize);
-    sample_t* buf = m_buffer.getBuffer();
+			// Deinterleave
+			for(int channel = 0; channel < channels; channel++)
+			{
+				m_input[channel].assureSize(len * sizeof(sample_t));
+				sample_t* channelBuf = m_input[channel].getBuffer();
 
-    m_reader->read(len, m_finishedReader, buf);
-    m_position += len;
+				for(int i = 0; i < len; i++)
+				{
+					channelBuf[i] = buf[i * channels + channel];
+				}
 
-    // Deinterleave
-    for (int channel = 0; channel < channels; ++channel)
-    {
-        m_input[channel].assureSize(len * sizeof(sample_t));
-        sample_t* channelBuf = m_input[channel].getBuffer();
+				m_processData[channel] = channelBuf;
+			}
 
-        for (int i = 0; i < len; ++i)
-        {
-            channelBuf[i] = buf[i * channels + channel];
-        }
+			m_stretcher->process(m_processData.data(), len, m_finishedReader);
+		}
 
-        m_processData[channel] = channelBuf;
-    }
+		int available = m_stretcher->available();
+		if(available == -1)
+		{
+			eos = true;
+			break;
+		}
 
-    m_stretcher->process(m_processData.data(), len, m_finishedReader);
+		int remaining = length - buf_position;
+		int readAmt = std::min({left, available, remaining});
+		if(readAmt <= 0)
+			break;
+
+		left -= readAmt;
+
+		for(int channel = 0; channel < channels; ++channel)
+		{
+			m_output[channel].assureSize(readAmt * sizeof(sample_t));
+			m_retrieveData[channel] = m_output[channel].getBuffer();
+		}
+
+		m_stretcher->retrieve(m_retrieveData.data(), readAmt);
+
+		for(int channel = 0; channel < channels; ++channel)
+		{
+			sample_t* outputBuf = m_output[channel].getBuffer();
+			for(int i = 0; i < readAmt; ++i)
+			{
+				buffer[(buf_position + i) * channels + channel] = outputBuf[i];
+			}
+		}
+
+		buf_position += readAmt;
+		m_length += readAmt;
 	}
 
-    int available = m_stretcher->available();
-    if (available == -1)
-    {
-        eos = true;
-        break;
-    }
-
-    int remaining = length - buf_position;
-    int readAmt = std::min({left, available, remaining});
-    if (readAmt <= 0)
-        break;
-
-    left -= readAmt;
-
-    for (int channel = 0; channel < channels; ++channel)
-    {
-        m_output[channel].assureSize(readAmt * sizeof(sample_t));
-        m_retrieveData[channel] = m_output[channel].getBuffer();
-    }
-
-    m_stretcher->retrieve(m_retrieveData.data(), readAmt);
-
-    for (int channel = 0; channel < channels; ++channel)
-    {
-        sample_t* outputBuf = m_output[channel].getBuffer();
-        for (int i = 0; i < readAmt; ++i)
-        {
-            buffer[(buf_position + i) * channels + channel] = outputBuf[i];
-        }
-    }
-
-    buf_position += readAmt;
-    m_length += readAmt;
-}
-
-	
 	eos = m_stretcher->available() == -1;
 }
 
