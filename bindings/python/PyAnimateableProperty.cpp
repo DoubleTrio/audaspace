@@ -287,6 +287,7 @@ static PyObject* AnimateableProperty_subscript(PyObject* self_obj, PyObject* ind
 {
 	AnimateablePropertyP* self = reinterpret_cast<AnimateablePropertyP*>(self_obj);
 
+	// Case 1: Check for single index
 	if(PyLong_Check(index))
 	{
 		PyObject* args = PyTuple_Pack(1, index);
@@ -295,67 +296,73 @@ static PyObject* AnimateableProperty_subscript(PyObject* self_obj, PyObject* ind
 		return result;
 	}
 
-	if(PySlice_Check(index))
+	// Case 2: Check for slice
+	if(!PySlice_Check(index))
 	{
-		PySliceObject* slice = reinterpret_cast<PySliceObject*>(index);
+		PyErr_SetString(PyExc_TypeError, "index must be double or slice");
+		return nullptr;
+	}
 
-		PyObject* start_obj = slice->start;
-		PyObject* stop_obj = slice->stop;
-		PyObject* step_obj = slice->step;
+	PySliceObject* slice = reinterpret_cast<PySliceObject*>(index);
 
-		double start = 0.0;
-		double stop = 0.0;
-		double step = 1.0;
+	PyObject* start_obj = slice->start;
+	PyObject* stop_obj = slice->stop;
+	PyObject* step_obj = slice->step;
 
-		if(start_obj != Py_None)
+	double start = 0.0;
+	double stop = 0.0;
+	double step = 1.0;
+
+	if(start_obj != Py_None)
+	{
+		start = PyFloat_AsDouble(start_obj);
+	}
+
+	if(stop_obj != Py_None)
+	{
+		stop = PyFloat_AsDouble(stop_obj);
+	}
+	else
+	{
+		PyErr_SetString(PyExc_ValueError, "ending index for slice must be specified.");
+		return nullptr;
+	}
+
+	if(step_obj != Py_None)
+	{
+		step = PyFloat_AsDouble(step_obj);
+
+		if(step == 0.0)
 		{
-			start = PyFloat_AsDouble(start_obj);
-		}
-		if(stop_obj != Py_None)
-		{
-			stop = PyFloat_AsDouble(stop_obj);
-		}
-		else
-		{
-			PyErr_SetString(PyExc_ValueError, "ending index for slice must be specified.");
+			PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
 			return nullptr;
 		}
-
-		if(step_obj != Py_None)
-		{
-			step = PyFloat_AsDouble(step_obj);
-
-			if(step == 0.0)
-			{
-				PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
-				return nullptr;
-			}
-		}
-		int n = std::max(0, (int) std::floor((stop - start) / step));
-		int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
-
-		npy_intp shape[2] = {n, m};
-		PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
-
-		PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
-
-		int i = 0;
-		for(double position = start; (step > 0 ? position < stop : position > stop); position += step, i++)
-		{
-			PyObject* args = PyTuple_Pack(1, PyFloat_FromDouble(position));
-			PyObject* item = AnimateableProperty_read(self, args);
-			Py_DECREF(args);
-
-			float* item_data = static_cast<float*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(item)));
-
-			float* row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
-			std::memcpy(row, item_data, m * sizeof(float));
-
-			Py_DECREF(item);
-		}
-
-		return result;
 	}
+
+	int n = std::max(0, (int) std::floor((stop - start) / step));
+	int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
+
+	npy_intp shape[2] = {n, m};
+	PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
+
+	PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
+
+	for(int i = 0; i < n; i++)
+	{
+		double position = start + i * step;
+		PyObject* args = PyTuple_Pack(1, PyFloat_FromDouble(position));
+		PyObject* value = AnimateableProperty_read(self, args);
+		Py_DECREF(args);
+
+		PyArrayObject* arr_item = reinterpret_cast<PyArrayObject*>(PyArray_FromAny(value, PyArray_DescrFromType(NPY_FLOAT32), 1, 1, NPY_ARRAY_CARRAY, nullptr));
+		Py_DECREF(value);
+
+		float* src = static_cast<float*>(PyArray_DATA(arr_item));
+		float* row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
+		std::memcpy(row, src, m * sizeof(float));
+	}
+
+	return result;
 }
 
 static int AnimateableProperty_ass_subscript(PyObject* obj, PyObject* key, PyObject* value)
