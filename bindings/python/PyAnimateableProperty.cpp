@@ -159,7 +159,7 @@ static PyObject* AnimateableProperty_write(AnimateablePropertyP* self, PyObject*
 		return nullptr;
 	}
 
-	float* data_ptr = (float*) PyArray_DATA(np_array);
+	float* data_ptr = reinterpret_cast<float*>(PyArray_DATA(np_array));
 
 	try
 	{
@@ -209,7 +209,7 @@ static PyObject* AnimateableProperty_writeConstantRange(AnimateablePropertyP* se
 		return nullptr;
 	}
 
-	float* data_ptr = (float*) PyArray_DATA(np_array);
+	float* data_ptr = reinterpret_cast<float*>(PyArray_DATA(np_array));
 
 	try
 	{
@@ -283,6 +283,94 @@ static PyGetSetDef AnimateableProperty_properties[] = {
 
 PyDoc_STRVAR(M_aud_AnimateableProperty_doc, "An AnimateableProperty object stores an array of float values for animating sound properties (e.g. pan, volume, pitch-scale)");
 
+static PyObject* AnimateableProperty_subscript(PyObject* self_obj, PyObject* index)
+{
+	AnimateablePropertyP* self = reinterpret_cast<AnimateablePropertyP*>(self_obj);
+
+	if(PyLong_Check(index))
+	{
+		PyObject* args = PyTuple_Pack(1, index);
+		PyObject* result = AnimateableProperty_read(self, args);
+		Py_DECREF(args);
+		return result;
+	}
+
+	if(PySlice_Check(index))
+	{
+		PySliceObject* slice = reinterpret_cast<PySliceObject*>(index);
+
+		PyObject* start_obj = slice->start;
+		PyObject* stop_obj = slice->stop;
+		PyObject* step_obj = slice->step;
+
+		double start = 0.0;
+		double stop = 0.0;
+		double step = 1.0;
+
+		if(start_obj != Py_None)
+		{
+			start = PyFloat_AsDouble(start_obj);
+		}
+		if(stop_obj != Py_None)
+		{
+			stop = PyFloat_AsDouble(stop_obj);
+		}
+		else
+		{
+			PyErr_SetString(PyExc_ValueError, "ending index for slice must be specified.");
+			return nullptr;
+		}
+
+		if(step_obj != Py_None)
+		{
+			step = PyFloat_AsDouble(step_obj);
+
+			if(step == 0.0)
+			{
+				PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
+				return nullptr;
+			}
+		}
+		int n = std::max(0, (int) std::floor((stop - start) / step));
+		int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
+
+		npy_intp shape[2] = {n, m};
+		PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
+
+		PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
+
+		int i = 0;
+		for(double position = start; (step > 0 ? position < stop : position > stop); position += step, i++)
+		{
+			PyObject* args = PyTuple_Pack(1, PyFloat_FromDouble(position));
+			PyObject* item = AnimateableProperty_read(self, args);
+			Py_DECREF(args);
+
+			float* item_data = static_cast<float*>(PyArray_DATA(reinterpret_cast<PyArrayObject*>(item)));
+
+			float* row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
+			std::memcpy(row, item_data, m * sizeof(float));
+
+			Py_DECREF(item);
+		}
+
+		return result;
+	}
+}
+
+static int AnimateableProperty_ass_subscript(PyObject* obj, PyObject* key, PyObject* value)
+{
+	AnimateablePropertyP* self = reinterpret_cast<AnimateablePropertyP*>(self);
+
+	return -1;
+}
+
+static PyMappingMethods AnimateableProperty_as_mapping = {
+    0,                                          /* mp_length */
+    (binaryfunc) AnimateableProperty_subscript, /* mp_subscript */
+    AnimateableProperty_ass_subscript,          /* mp_ass_subscript */
+};
+
 // Note that AnimateablePropertyType name is already taken
 PyTypeObject AnimateablePropertyPyType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "aud.AnimateableProperty", /* tp_name */
@@ -296,7 +384,7 @@ PyTypeObject AnimateablePropertyPyType = {
     0,                                                           /* tp_repr */
     0,                                                           /* tp_as_number */
     0,                                                           /* tp_as_sequence */
-    0,                                                           /* tp_as_mapping */
+    &AnimateableProperty_as_mapping,                             /* tp_as_mapping */
     0,                                                           /* tp_hash  */
     0,                                                           /* tp_call */
     0,                                                           /* tp_str */

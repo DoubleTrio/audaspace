@@ -1845,19 +1845,19 @@ Sound_timeStretchPitchScale(Sound* self, PyObject* args)
 }
 
 PyDoc_STRVAR(M_aud_Sound_animateableTimeStretchPitchScale_doc, ".. method:: animateableTimeStretchPitchScale(time_ratio, pitch_scale, quality, preserve_formant, fps)\n\n"
-                                                            "   Applies time-stretching and pitch-scaling to the sound.\n\n"
-                                                            "   :arg time_ratio: The factor by which to stretch or compress time.\n"
-                                                            "   :type time_ratio: float\n"
-                                                            "   :arg pitch_scale: The factor by which to adjust the pitch.\n"
-                                                            "   :type pitch_scale: float\n"
-                                                            "   :arg quality: Rubberband stretcher quality (STRETCHER_QUALITY_*).\n"
-                                                            "   :type quality: int\n"
-                                                            "   :arg preserve_formant: Whether to preserve the vocal formants during pitch-shifting.\n"
-                                                            "   :type preserve_formant: bool\n"
-                                                            "   :arg fps: The FPS of the animation system.\n"
-                                                            "   :type fps float\n"
-                                                            "   :return: The created :class:`Sound` object.\n"
-                                                            "   :rtype: :class:`Sound`");
+                                                               "   Applies time-stretching and pitch-scaling to the sound.\n\n"
+                                                               "   :arg time_ratio: The factor by which to stretch or compress time.\n"
+                                                               "   :type time_ratio: float or :class:`AnimateablePropertyP`\n"
+                                                               "   :arg pitch_scale: The factor by which to adjust the pitch.\n"
+                                                               "   :type pitch_scale: float or :class:`AnimateablePropertyP`\n "
+                                                               "   :arg quality: Rubberband stretcher quality (STRETCHER_QUALITY_*).\n"
+                                                               "   :type quality: int\n"
+                                                               "   :arg preserve_formant: Whether to preserve the vocal formants during pitch-shifting.\n"
+                                                               "   :type preserve_formant: bool\n"
+                                                               "   :arg fps: The FPS of the animation system.\n"
+                                                               "   :type fps float\n"
+                                                               "   :return: The created :class:`Sound` object.\n"
+                                                               "   :rtype: :class:`Sound`");
 static PyObject* Sound_animateableTimeStretchPitchScale(Sound* self, PyObject* args, PyObject* kwds)
 {
 	double time_ratio, pitch_scale;
@@ -1865,12 +1865,12 @@ static PyObject* Sound_animateableTimeStretchPitchScale(Sound* self, PyObject* a
 	int preserve_formant = 0;
 	float fps = 30.0;
 
-	if(!PyArg_ParseTuple(args, "dd|ipf:animateableTimeStretchPitchScale", &time_ratio, &pitch_scale, &quality, &preserve_formant, &fps))
+	if(!PyArg_ParseTuple(args, "OO|ipf:animateableTimeStretchPitchScale", &time_ratio, &pitch_scale, &quality, &preserve_formant, &fps))
 		return nullptr;
 
 	if(fps <= 0)
 	{
-		PyErr_SetString(PyExc_ValueError, "fps must be greater 0!");
+		PyErr_SetString(PyExc_ValueError, "FPS must be greater 0!");
 		return nullptr;
 	}
 
@@ -1901,58 +1901,6 @@ static PyObject* Sound_animateableTimeStretchPitchScale(Sound* self, PyObject* a
 	return (PyObject*) parent;
 }
 
-static PyObject * 
-Sound_animateableTimeStretchPitchScale_getAnimProperty(Sound* self, PyObject* args)
-{
-    int type;
-    if (!PyArg_ParseTuple(args, "i:getAnimProperty", &type))
-        return nullptr;
-
-		auto atps = std::dynamic_pointer_cast<AnimateableTimeStretchPitchScale>(
-				*reinterpret_cast<std::shared_ptr<ISound>*>(self->sound)
-		);
-
-    if (!atps) {
-        PyErr_SetString(PyExc_TypeError, "Sound is not an AnimateableTimeStretchPitchScale!");
-        return nullptr;
-    }
-
-    AnimateablePropertyP* prop =
-        (AnimateablePropertyP*)AnimateableProperty_empty();
-    try
-    {
-        auto animProp = atps->getAnimProperty(static_cast<AnimateablePropertyType>(type));
-
-        if (!animProp) {
-            Py_DECREF(prop);
-            PyErr_SetString(PyExc_ValueError, "Invalid AnimateablePropertyType");
-            return nullptr;
-        }
-
-        prop->animateableProperty = new std::shared_ptr<AnimateableProperty>(animProp);
-
-        if (prop->animateableProperty == nullptr) {
-            Py_DECREF(prop);
-            PyErr_SetString(PyExc_ValueError, "Invalid AnimateablePropertyType");
-            return nullptr;
-        }
-    }
-    catch (const Exception& e)
-    {
-        Py_DECREF(prop);
-        PyErr_SetString(AUDError, e.what());
-        return nullptr;
-    }
-
-    return (PyObject*)prop;
-}
-
-PyDoc_STRVAR(M_aud_Sound_animateableTimeStretchPitchScale_getAnimProperty_doc, ".. method:: animateableTimeStretchPitchScale_getAnimProperty(type)\n\n"
-                                                            "   Retrieves one of the animated properties of the sound (time-stretch or pitch-scaling).\n\n"
-                                                            "   :arg type: Which animated property to retrieve (AUD_AP_*).\n"
-                                                            "   :type type: int\n"
-                                                            "   :return: The created :class:`AnimateablePropertyP` object.\n"
-                                                            "   :rtype: :class:`AnimateablePropertyP`\n");
 #endif
 
 static PyMethodDef Sound_methods[] = {
@@ -2072,10 +2020,8 @@ static PyMethodDef Sound_methods[] = {
 #ifdef WITH_RUBBERBAND
 	{"timeStretchPitchScale", (PyCFunction)Sound_timeStretchPitchScale, METH_VARARGS,
 	M_aud_Sound_timeStretchPitchScale_doc},
-  {"animateableTimeStretchPitchScale", (PyCFunction) Sound_animateableTimeStretchPitchScale, METH_VARARGS, 
+	{"animateableTimeStretchPitchScale", (PyCFunction) Sound_animateableTimeStretchPitchScale, METH_VARARGS, 
 	M_aud_Sound_animateableTimeStretchPitchScale_doc},
-	{"animateableTimeStretchPitchScale_getAnimProperty", (PyCFunction) Sound_animateableTimeStretchPitchScale_getAnimProperty, METH_VARARGS, 
-	M_aud_Sound_animateableTimeStretchPitchScale_getAnimProperty_doc},
 #endif
 	{nullptr}  /* Sentinel */
 };
