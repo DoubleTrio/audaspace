@@ -283,86 +283,230 @@ static PyGetSetDef AnimateableProperty_properties[] = {
 
 PyDoc_STRVAR(M_aud_AnimateableProperty_doc, "An AnimateableProperty object stores an array of float values for animating sound properties (e.g. pan, volume, pitch-scale)");
 
-static PyObject* AnimateableProperty_subscript(PyObject* self_obj, PyObject* index)
+static PyObject* AnimateableProperty_read_slice(AnimateablePropertyP* self, double start, double stop, double step)
 {
-	AnimateablePropertyP* self = reinterpret_cast<AnimateablePropertyP*>(self_obj);
+    int n = std::max(0, (int) std::floor((stop - start) / step));
+    int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
 
+    npy_intp shape[2] = { n, m };
+    PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
+    PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
+
+		 printf("5\n");
+    for (int i = 0; i < n; i++)
+    {
+        double position = start + i * step;
+        PyObject* args = PyTuple_Pack(1, PyFloat_FromDouble(position));
+        PyObject* value = AnimateableProperty_read(self, args);
+        Py_DECREF(args);
+
+        PyArrayObject* arr_item = reinterpret_cast<PyArrayObject*>(
+            PyArray_FromAny(value, PyArray_DescrFromType(NPY_FLOAT32), 1, 1, NPY_ARRAY_CARRAY, nullptr)
+        );
+        Py_DECREF(value);
+
+        float* src = static_cast<float*>(PyArray_DATA(arr_item));
+        float* row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
+        std::memcpy(row, src, m * sizeof(float));
+
+        Py_DECREF(arr_item);
+    }
+		    printf("4\n");
+
+    return result;
+}
+
+struct SliceInfo {
+	double start;
+	double stop;
+	double step;
+	int count;
+	bool is_single;
+};
+
+// Note that if it's a row, the upper-bound needs to be specified and doubles are allowed. 
+// For columns on the other hand, only integers are allowed and the upper-bound does not need to be specified
+static bool parse_slice(PyObject* index_obj, SliceInfo& slice_info, int max_len, bool is_column) {
 	// Case 1: Check for single index
-	if(PyLong_Check(index))
+	if (is_column && PyFloat_Check(index_obj)) {
+		PyErr_SetString(PyExc_TypeError, "column indices must be integers");
+		return false;
+	}
+
+	// Case 1a: Single int index
+	if (PyLong_Check(index_obj))
 	{
-		PyObject* args = PyTuple_Pack(1, index);
-		PyObject* result = AnimateableProperty_read(self, args);
-		Py_DECREF(args);
-		return result;
+			long idx = PyLong_AsLong(index_obj);
+
+			slice_info.start = idx;
+			slice_info.stop = slice_info.start + 1;
+			slice_info.step = 1.0;
+			slice_info.count = 1;
+			slice_info.is_single = true;
+			return true;
+	}
+
+	if (PyFloat_Check(index_obj))
+	{
+			double idx = PyFloat_AsDouble(index_obj);
+			slice_info.start = idx;
+			slice_info.stop = idx + 1.0;
+			slice_info.step = 1.0;
+			slice_info.count = 1;
+			slice_info.is_single = true;
+			return true;
 	}
 
 	// Case 2: Check for slice
-	if(!PySlice_Check(index))
+	if(PySlice_Check(index_obj))
 	{
-		PyErr_SetString(PyExc_TypeError, "index must be double or slice");
-		return nullptr;
-	}
+		PySliceObject* slice = reinterpret_cast<PySliceObject*>(index_obj);
 
-	PySliceObject* slice = reinterpret_cast<PySliceObject*>(index);
+		PyObject* start_obj = slice->start;
+		PyObject* stop_obj = slice->stop;
+		PyObject* step_obj = slice->step;
 
-	PyObject* start_obj = slice->start;
-	PyObject* stop_obj = slice->stop;
-	PyObject* step_obj = slice->step;
+		double start = 0.0;
+		double stop = 0.0;
+		double step = 1.0;
 
-	double start = 0.0;
-	double stop = 0.0;
-	double step = 1.0;
-
-	if(start_obj != Py_None)
-	{
-		start = PyFloat_AsDouble(start_obj);
-	}
-
-	if(stop_obj != Py_None)
-	{
-		stop = PyFloat_AsDouble(stop_obj);
-	}
-	else
-	{
-		PyErr_SetString(PyExc_ValueError, "ending index for slice must be specified.");
-		return nullptr;
-	}
-
-	if(step_obj != Py_None)
-	{
-		step = PyFloat_AsDouble(step_obj);
-
-		if(step == 0.0)
-		{
-			PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
-			return nullptr;
+		if(is_column && start_obj != Py_None && PyFloat_Check(start_obj)) {
+			PyErr_SetString(PyExc_TypeError, "column indices must be integers");
+			return false;
 		}
+
+		if(is_column && stop_obj != Py_None && PyFloat_Check(stop_obj)) {
+			PyErr_SetString(PyExc_TypeError, "column indices must be integers");
+			return false;
+		}
+
+		if(is_column && step_obj != Py_None && PyFloat_Check(step_obj)) {
+			PyErr_SetString(PyExc_TypeError, "column indices must be integers");
+			return false;
+		}
+
+		if(start_obj != Py_None)
+		{
+			start = PyFloat_AsDouble(start_obj);
+		}
+
+		if(stop_obj != Py_None)
+		{
+			stop = PyFloat_AsDouble(stop_obj);
+		}
+		else
+		{
+			if (!is_column) {
+				PyErr_SetString(PyExc_ValueError, "ending index for slice must be specified.");
+				return false;
+			} else {
+				stop = max_len;
+			}
+		} 
+
+		if(step_obj != Py_None)
+		{
+			step = PyFloat_AsDouble(step_obj);
+
+			if(step == 0.0)
+			{
+				PyErr_SetString(PyExc_ValueError, "slice step cannot be zero");
+				return false;
+			}
+		}
+
+
+		slice_info.count = std::max(0, (int)std::floor((stop - start) / step));
+		slice_info.start = start;
+		slice_info.stop = stop;
+		slice_info.step = step;
+		if (is_column) {
+			slice_info.count = std::min(slice_info.count, max_len);
+		}
+
+    return true;
+
 	}
 
-	int n = std::max(0, (int) std::floor((stop - start) / step));
-	int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
-
-	npy_intp shape[2] = {n, m};
-	PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
-
-	PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
-
-	for(int i = 0; i < n; i++)
-	{
-		double position = start + i * step;
-		PyObject* args = PyTuple_Pack(1, PyFloat_FromDouble(position));
-		PyObject* value = AnimateableProperty_read(self, args);
-		Py_DECREF(args);
-
-		PyArrayObject* arr_item = reinterpret_cast<PyArrayObject*>(PyArray_FromAny(value, PyArray_DescrFromType(NPY_FLOAT32), 1, 1, NPY_ARRAY_CARRAY, nullptr));
-		Py_DECREF(value);
-
-		float* src = static_cast<float*>(PyArray_DATA(arr_item));
-		float* row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
-		std::memcpy(row, src, m * sizeof(float));
+	// Case 3: Column
+	if (is_column && index_obj == Py_None) {
+		slice_info.start = 0.0;
+		slice_info.stop = (max_len >= 0 ? max_len : 0);
+		slice_info.step = 1.0;
+		slice_info.count = (max_len >= 0 ? max_len : 0);
+		return true;
 	}
 
-	return result;
+	PyErr_SetString(PyExc_TypeError, !is_column ? "row index must be int, float, or slice"
+                                            : "column index must be int or slice");
+  return false;
+
+
+}
+
+static PyObject* AnimateableProperty_subscript(PyObject* self_obj, PyObject* index)
+{
+    AnimateablePropertyP* self = reinterpret_cast<AnimateablePropertyP*>(self_obj);
+
+    PyObject* row_index = nullptr;
+    PyObject* col_index = nullptr;
+
+
+    if (PyTuple_Check(index))
+    {
+        if (PyTuple_Size(index) != 2)
+        {
+            PyErr_SetString(PyExc_IndexError, "too many indices for array: array is 2-dimensional");
+            return nullptr;
+        }
+        row_index = PyTuple_GetItem(index, 0);
+        col_index = PyTuple_GetItem(index, 1);
+    }
+    else
+    {
+        row_index = index;
+        col_index = Py_None;
+    }
+
+
+    SliceInfo row_slice{};
+    if (!parse_slice(row_index, row_slice, -1, false))
+        return nullptr;
+
+    int m = (*reinterpret_cast<std::shared_ptr<aud::AnimateableProperty>*>(self->animateableProperty))->getCount();
+
+    SliceInfo col_slice{};
+    if (!parse_slice(col_index, col_slice, m, true))
+        return nullptr;
+
+    PyObject* full_result = AnimateableProperty_read_slice(self, row_slice.start, row_slice.stop, row_slice.step);
+
+    PyArrayObject* arr_result = reinterpret_cast<PyArrayObject*>(full_result);
+
+    if (col_slice.count != m)  
+    {
+        npy_intp shape[2] = { row_slice.count, col_slice.count };
+        PyObject* result = PyArray_SimpleNew(2, shape, NPY_FLOAT32);
+        if (!result)
+        {
+            Py_DECREF(full_result);
+            return nullptr;
+        }
+
+        PyArrayObject* result_arr = reinterpret_cast<PyArrayObject*>(result);
+
+        for (int i = 0; i < row_slice.count; i++)
+        {
+            float* src_row = static_cast<float*>(PyArray_GETPTR2(arr_result, i, (int)col_slice.start));
+            float* dst_row = static_cast<float*>(PyArray_GETPTR2(result_arr, i, 0));
+            std::memcpy(dst_row, src_row, col_slice.count * sizeof(float));
+        }
+
+        Py_DECREF(full_result);
+        return result;
+    }
+
+    return full_result;
 }
 
 static int AnimateableProperty_ass_subscript(PyObject* obj, PyObject* key, PyObject* value)
